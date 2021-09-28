@@ -172,6 +172,7 @@ func (drive *Drive) jsonRequest(ctx context.Context, method, url string, request
 		bodyBytes = b
 	}
 
+retry:
 	res, err := drive.request(ctx, method, url, headers, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return errors.WithStack(err)
@@ -180,6 +181,10 @@ func (drive *Drive) jsonRequest(ctx context.Context, method, url string, request
 
 	if res.StatusCode == http.StatusNotFound {
 		return errors.Wrapf(os.ErrNotExist, `failed to request "%s", got "%d"`, url, res.StatusCode)
+	}
+
+	if res.StatusCode == http.StatusTooManyRequests {
+		goto retry
 	}
 
 	if res.StatusCode >= 400 {
