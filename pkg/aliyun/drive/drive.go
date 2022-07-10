@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"path"
@@ -314,9 +316,37 @@ func (drive *Drive) listNodes(ctx context.Context, nodeId string) ([]Node, error
 			break
 		}
 
-		err := drive.jsonRequest(ctx, "POST", apiList, &data, &lNodes)
-		if err != nil {
-			return nil, errors.WithStack(err)
+		var (
+			retryCount       = 0
+			maxRetryCount    = 100
+			retryInitBackoff = time.Second
+			retryMaxBackoff  = time.Minute
+		)
+	retry:
+		for {
+			err := drive.jsonRequest(ctx, "POST", apiList, &data, &lNodes)
+			if err == nil {
+				break retry
+			}
+
+			if httpError, ok := err.(HTTPStatusError); ok {
+				if httpError.StatusCode() == http.StatusBadGateway {
+					retryCount++
+
+					rand.Seed(time.Now().UnixNano())
+					jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+
+					backoff := time.Duration(retryCount)*retryInitBackoff + jitter
+					if backoff > retryMaxBackoff {
+						backoff = retryMaxBackoff + jitter
+					}
+					log.Printf("list error with http.StatusBadGateway, current nodes count: %d, retry after %s", len(nodes), backoff)
+					time.Sleep(backoff)
+					continue
+				}
+			} else {
+				return nil, errors.WithStack(err)
+			}
 		}
 
 		nodes = append(nodes, lNodes.Items...)
